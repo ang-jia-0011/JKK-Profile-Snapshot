@@ -1,0 +1,48 @@
+name: Build extension
+
+on:
+  workflow_dispatch:
+    inputs:
+      browser:
+        description: Browser target
+        required: true
+        default: chrome
+        type: choice
+        options:
+          - chrome
+          - firefox
+          - edge
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build ${{ inputs.browser }} extension
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: yarn
+
+      - name: Install dependencies
+        run: yarn install --frozen-lockfile
+
+      - name: Type check
+        run: yarn compile
+
+      - name: Build extension package
+        run: yarn wxt zip -b ${{ inputs.browser }}
+
+      - name: Upload extension artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: profile-snapshot-${{ inputs.browser }}
+          path: .output/*-${{ inputs.browser }}.zip
+          if-no-files-found: error
