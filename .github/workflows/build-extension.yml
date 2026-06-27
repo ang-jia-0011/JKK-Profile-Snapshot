@@ -40,9 +40,26 @@ jobs:
       - name: Build extension package
         run: yarn wxt zip -b ${{ inputs.browser }}
 
+      - name: Prepare artifact
+        env:
+          BROWSER_TARGET: ${{ inputs.browser }}
+        run: |
+          mkdir -p .artifacts
+          echo "Generated files:"
+          find .output -maxdepth 2 -type f -print
+
+          zip_path="$(find .output -maxdepth 1 -type f -name "*-${BROWSER_TARGET}.zip" | head -n 1)"
+
+          if [ -z "$zip_path" ]; then
+            echo "No extension zip found for browser target: ${BROWSER_TARGET}"
+            exit 1
+          fi
+
+          cp "$zip_path" ".artifacts/profile-snapshot-${BROWSER_TARGET}.zip"
+
       - name: Upload extension artifact
         uses: actions/upload-artifact@v7
         with:
           name: profile-snapshot-${{ inputs.browser }}
-          path: .output/*-${{ inputs.browser }}.zip
+          path: .artifacts/profile-snapshot-${{ inputs.browser }}.zip
           if-no-files-found: error

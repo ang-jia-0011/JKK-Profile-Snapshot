@@ -18,6 +18,7 @@ const warningOpen = ref(true);
 const summaryOpen = ref(true);
 const selectedSnapshot = ref<ProfileSnapshot | null>(null);
 const detailLoading = ref(false);
+const createPanelOpen = ref(false);
 
 const WARNING_OPEN_KEY = 'profileSnapshotPopup:warningOpen';
 const SUMMARY_OPEN_KEY = 'profileSnapshotPopup:summaryOpen';
@@ -65,6 +66,7 @@ async function createSnapshot() {
     message.value = result.message ?? '';
     if (result.ok) {
       snapshotName.value = '';
+      createPanelOpen.value = false;
       await refreshState();
     }
   } catch (error) {
@@ -222,20 +224,51 @@ function saveDetailsPreference(key: string, event: Event) {
       </button>
     </header>
 
-    <details
-      class="collapsible warning"
-      :open="warningOpen"
-      @toggle="saveDetailsPreference(WARNING_OPEN_KEY, $event)"
+    <div
+      class="top-panels"
+      :class="{ compact: state?.supported && !warningOpen && !summaryOpen }"
     >
-      <summary>
-        <span>Security warning</span>
-        <span class="summary-hint">Sensitive data</span>
-      </summary>
-      <p>
-        Snapshots can contain login cookies, access tokens, client secrets, and other sensitive
-        session data. They stay in local extension storage.
-      </p>
-    </details>
+      <details
+        class="collapsible warning"
+        :open="warningOpen"
+        @toggle="saveDetailsPreference(WARNING_OPEN_KEY, $event)"
+      >
+        <summary>
+          <span>Security warning</span>
+          <span class="summary-hint">Sensitive data</span>
+        </summary>
+        <p>
+          Snapshots can contain login cookies, access tokens, client secrets, and other sensitive
+          session data. They stay in local extension storage.
+        </p>
+      </details>
+
+      <details
+        v-if="!loading && state?.supported"
+        class="collapsible summary-panel"
+        :open="summaryOpen"
+        @toggle="saveDetailsPreference(SUMMARY_OPEN_KEY, $event)"
+      >
+        <summary>
+          <span>Storage summary</span>
+          <span class="summary-hint">{{ currentSnapshots.length }} snapshots</span>
+        </summary>
+        <div class="summary-grid">
+          <div>
+            <span>Current site</span>
+            <strong>{{ currentSnapshots.length }}</strong>
+          </div>
+          <div>
+            <span>Site storage</span>
+            <strong>{{ formatBytes(currentTotalSize) }}</strong>
+          </div>
+          <div>
+            <span>All storage</span>
+            <strong>{{ formatBytes(state.totalSizeBytes) }}</strong>
+          </div>
+        </div>
+      </details>
+    </div>
 
     <p v-if="message" class="message">{{ message }}</p>
 
@@ -248,45 +281,6 @@ function saveDetailsPreference(key: string, event: Event) {
       </section>
 
       <template v-else>
-        <details
-          class="collapsible summary-panel"
-          :open="summaryOpen"
-          @toggle="saveDetailsPreference(SUMMARY_OPEN_KEY, $event)"
-        >
-          <summary>
-            <span>Storage summary</span>
-            <span class="summary-hint">{{ currentSnapshots.length }} snapshots</span>
-          </summary>
-          <div class="summary-grid">
-            <div>
-              <span>Current site</span>
-              <strong>{{ currentSnapshots.length }}</strong>
-            </div>
-            <div>
-              <span>Site storage</span>
-              <strong>{{ formatBytes(currentTotalSize) }}</strong>
-            </div>
-            <div>
-              <span>All storage</span>
-              <strong>{{ formatBytes(state.totalSizeBytes) }}</strong>
-            </div>
-          </div>
-        </details>
-
-        <section class="create-panel">
-          <label for="snapshot-name">New snapshot name</label>
-          <div class="create-row">
-            <input
-              id="snapshot-name"
-              v-model="snapshotName"
-              :disabled="busy"
-              placeholder="Optional, e.g. admin user - dev"
-              @keyup.enter="createSnapshot"
-            />
-            <button :disabled="busy" @click="createSnapshot">Create</button>
-          </div>
-        </section>
-
         <div class="segmented">
           <button :class="{ active: activeView === 'site' }" @click="activeView = 'site'">
             Current site
@@ -299,10 +293,29 @@ function saveDetailsPreference(key: string, event: Event) {
         <section v-if="activeView === 'site'" class="snapshot-list">
           <div class="section-title">
             <h2>Saved for this site</h2>
-            <button class="danger ghost" :disabled="busy" @click="clearCurrentSite">
-              Clear site
-            </button>
+            <div class="section-actions">
+              <button class="ghost" :disabled="busy" @click="createPanelOpen = !createPanelOpen">
+                New snapshot
+              </button>
+              <button class="danger ghost" :disabled="busy" @click="clearCurrentSite">
+                Clear site
+              </button>
+            </div>
           </div>
+
+          <section v-if="createPanelOpen" class="create-panel">
+            <label for="snapshot-name">Snapshot name</label>
+            <div class="create-row">
+              <input
+                id="snapshot-name"
+                v-model="snapshotName"
+                :disabled="busy"
+                placeholder="Optional, e.g. admin user - dev"
+                @keyup.enter="createSnapshot"
+              />
+              <button :disabled="busy" @click="createSnapshot">Save</button>
+            </div>
+          </section>
 
           <p v-if="currentSnapshots.length === 0" class="empty-state">
             No snapshots saved for this origin yet.
