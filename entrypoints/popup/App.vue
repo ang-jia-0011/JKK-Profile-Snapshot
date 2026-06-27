@@ -100,16 +100,6 @@ async function deleteSnapshot(snapshotId: string, snapshotName: string) {
   await runAction({ type: 'DELETE_SNAPSHOT', snapshotId });
 }
 
-async function clearCurrentSite() {
-  if (!state.value?.tabId || busy.value) return;
-  const confirmed = confirm(
-    `Clear all browser state for ${state.value.origin}?\n\nThis removes this site's cookies, localStorage, sessionStorage, IndexedDB, Cache Storage, and Service Worker registrations where supported. Saved snapshots are not deleted.`,
-  );
-  if (!confirmed) return;
-
-  await runAction({ type: 'CLEAR_ORIGIN', tabId: state.value.tabId });
-}
-
 async function deleteAllSnapshots() {
   if (busy.value) return;
   const confirmed = confirm(
@@ -296,9 +286,6 @@ function saveDetailsPreference(key: string, event: Event) {
             <div class="section-actions">
               <button class="ghost" :disabled="busy" @click="createPanelOpen = !createPanelOpen">
                 New snapshot
-              </button>
-              <button class="danger ghost" :disabled="busy" @click="clearCurrentSite">
-                Clear site
               </button>
             </div>
           </div>
