@@ -1,4 +1,6 @@
 <script lang="ts" setup>
+import { FontAwesomeIcon } from '@fortawesome/vue-fontawesome';
+import { faClockRotateLeft, faFileExport, faTrashCan } from '@fortawesome/free-solid-svg-icons';
 import { computed, onMounted, ref } from 'vue';
 import { formatBytes, type ActionResult, type PopupState, type ProfileSnapshot } from '@/utils/snapshots';
 
@@ -12,6 +14,13 @@ const busy = ref(false);
 const message = ref('');
 const snapshotName = ref('');
 const activeView = ref<'site' | 'all'>('site');
+const warningOpen = ref(true);
+const summaryOpen = ref(true);
+const selectedSnapshot = ref<ProfileSnapshot | null>(null);
+const detailLoading = ref(false);
+
+const WARNING_OPEN_KEY = 'profileSnapshotPopup:warningOpen';
+const SUMMARY_OPEN_KEY = 'profileSnapshotPopup:summaryOpen';
 
 const currentSnapshots = computed(() => state.value?.snapshots ?? []);
 const allGroups = computed(() => state.value?.allGroups ?? []);
@@ -20,6 +29,8 @@ const currentTotalSize = computed(() =>
 );
 
 onMounted(() => {
+  warningOpen.value = readBooleanPreference(WARNING_OPEN_KEY, true);
+  summaryOpen.value = readBooleanPreference(SUMMARY_OPEN_KEY, true);
   refreshState();
 });
 
@@ -135,6 +146,29 @@ async function exportSnapshot(snapshotId: string) {
   }
 }
 
+async function openSnapshotDetails(snapshotId: string) {
+  detailLoading.value = true;
+  message.value = '';
+
+  try {
+    const result = await sendMessage<SnapshotPayload>({ type: 'GET_SNAPSHOT', snapshotId });
+    if (!result.ok || !result.snapshot) {
+      message.value = result.message ?? 'Snapshot not found.';
+      return;
+    }
+
+    selectedSnapshot.value = result.snapshot;
+  } catch (error) {
+    message.value = friendlyError(error, 'Unable to load snapshot details.');
+  } finally {
+    detailLoading.value = false;
+  }
+}
+
+function closeSnapshotDetails() {
+  selectedSnapshot.value = null;
+}
+
 async function runAction(payload: unknown) {
   busy.value = true;
   message.value = '';
@@ -160,6 +194,20 @@ function formatDate(value: string) {
     timeStyle: 'short',
   }).format(new Date(value));
 }
+
+function readBooleanPreference(key: string, fallback: boolean) {
+  const value = localStorage.getItem(key);
+  if (value === 'true') return true;
+  if (value === 'false') return false;
+  return fallback;
+}
+
+function saveDetailsPreference(key: string, event: Event) {
+  const details = event.currentTarget as HTMLDetailsElement;
+  if (key === WARNING_OPEN_KEY) warningOpen.value = details.open;
+  if (key === SUMMARY_OPEN_KEY) summaryOpen.value = details.open;
+  localStorage.setItem(key, String(details.open));
+}
 </script>
 
 <template>
@@ -174,10 +222,20 @@ function formatDate(value: string) {
       </button>
     </header>
 
-    <section class="warning">
-      Snapshots can contain login cookies, access tokens, client secrets, and other sensitive
-      session data. They stay in local extension storage.
-    </section>
+    <details
+      class="collapsible warning"
+      :open="warningOpen"
+      @toggle="saveDetailsPreference(WARNING_OPEN_KEY, $event)"
+    >
+      <summary>
+        <span>Security warning</span>
+        <span class="summary-hint">Sensitive data</span>
+      </summary>
+      <p>
+        Snapshots can contain login cookies, access tokens, client secrets, and other sensitive
+        session data. They stay in local extension storage.
+      </p>
+    </details>
 
     <p v-if="message" class="message">{{ message }}</p>
 
@@ -190,20 +248,30 @@ function formatDate(value: string) {
       </section>
 
       <template v-else>
-        <div class="summary-grid">
-          <div>
-            <span>Current site</span>
-            <strong>{{ currentSnapshots.length }}</strong>
+        <details
+          class="collapsible summary-panel"
+          :open="summaryOpen"
+          @toggle="saveDetailsPreference(SUMMARY_OPEN_KEY, $event)"
+        >
+          <summary>
+            <span>Storage summary</span>
+            <span class="summary-hint">{{ currentSnapshots.length }} snapshots</span>
+          </summary>
+          <div class="summary-grid">
+            <div>
+              <span>Current site</span>
+              <strong>{{ currentSnapshots.length }}</strong>
+            </div>
+            <div>
+              <span>Site storage</span>
+              <strong>{{ formatBytes(currentTotalSize) }}</strong>
+            </div>
+            <div>
+              <span>All storage</span>
+              <strong>{{ formatBytes(state.totalSizeBytes) }}</strong>
+            </div>
           </div>
-          <div>
-            <span>Site storage</span>
-            <strong>{{ formatBytes(currentTotalSize) }}</strong>
-          </div>
-          <div>
-            <span>All storage</span>
-            <strong>{{ formatBytes(state.totalSizeBytes) }}</strong>
-          </div>
-        </div>
+        </details>
 
         <section class="create-panel">
           <label for="snapshot-name">New snapshot name</label>
@@ -241,26 +309,43 @@ function formatDate(value: string) {
           </p>
 
           <article v-for="snapshot in currentSnapshots" :key="snapshot.id" class="snapshot-card">
-            <div class="snapshot-main">
-              <h3>{{ snapshot.name }}</h3>
-              <p>{{ formatDate(snapshot.createdAt) }} · {{ formatBytes(snapshot.sizeBytes) }}</p>
-              <div class="chips">
-                <span v-for="type in snapshot.storageTypes" :key="type">{{ type }}</span>
-              </div>
-            </div>
+            <button
+              class="snapshot-info-button"
+              :disabled="detailLoading"
+              @click="openSnapshotDetails(snapshot.id)"
+            >
+              <span class="snapshot-title">{{ snapshot.name }}</span>
+              <span>{{ formatDate(snapshot.createdAt) }} · {{ formatBytes(snapshot.sizeBytes) }}</span>
+            </button>
             <div class="snapshot-actions">
-              <button :disabled="busy" @click="applySnapshot(snapshot.id, snapshot.name)">
-                Apply
+              <button
+                :disabled="busy"
+                title="Apply snapshot"
+                data-tooltip="Apply snapshot"
+                aria-label="Apply snapshot"
+                @click="applySnapshot(snapshot.id, snapshot.name)"
+              >
+                <FontAwesomeIcon :icon="faClockRotateLeft" />
               </button>
-              <button class="ghost" :disabled="busy" @click="exportSnapshot(snapshot.id)">
-                Export
+              <button
+                class="ghost"
+                :disabled="busy"
+                title="Export snapshot"
+                data-tooltip="Export snapshot"
+                aria-label="Export snapshot"
+                @click="exportSnapshot(snapshot.id)"
+              >
+                <FontAwesomeIcon :icon="faFileExport" />
               </button>
               <button
                 class="danger ghost"
                 :disabled="busy"
+                title="Delete snapshot"
+                data-tooltip="Delete snapshot"
+                aria-label="Delete snapshot"
                 @click="deleteSnapshot(snapshot.id, snapshot.name)"
               >
-                Delete
+                <FontAwesomeIcon :icon="faTrashCan" />
               </button>
             </div>
           </article>
@@ -282,20 +367,34 @@ function formatDate(value: string) {
               <span>{{ group.snapshots.length }} · {{ formatBytes(group.totalSizeBytes) }}</span>
             </div>
             <article v-for="snapshot in group.snapshots" :key="snapshot.id" class="compact-row">
-              <div>
-                <strong>{{ snapshot.name }}</strong>
+              <button
+                class="compact-info-button"
+                :disabled="detailLoading"
+                @click="openSnapshotDetails(snapshot.id)"
+              >
+                <span>{{ snapshot.name }}</span>
                 <span>{{ formatDate(snapshot.createdAt) }} · {{ formatBytes(snapshot.sizeBytes) }}</span>
-              </div>
+              </button>
               <div class="row-actions">
-                <button class="ghost" :disabled="busy" @click="exportSnapshot(snapshot.id)">
-                  Export
+                <button
+                  class="ghost"
+                  :disabled="busy"
+                  title="Export snapshot"
+                  data-tooltip="Export snapshot"
+                  aria-label="Export snapshot"
+                  @click="exportSnapshot(snapshot.id)"
+                >
+                  <FontAwesomeIcon :icon="faFileExport" />
                 </button>
                 <button
                   class="danger ghost"
                   :disabled="busy"
+                  title="Delete snapshot"
+                  data-tooltip="Delete snapshot"
+                  aria-label="Delete snapshot"
                   @click="deleteSnapshot(snapshot.id, snapshot.name)"
                 >
-                  Delete
+                  <FontAwesomeIcon :icon="faTrashCan" />
                 </button>
               </div>
             </article>
@@ -308,5 +407,64 @@ function formatDate(value: string) {
         </footer>
       </template>
     </template>
+
+    <div v-if="selectedSnapshot" class="dialog-backdrop" @click.self="closeSnapshotDetails">
+      <section class="snapshot-dialog" role="dialog" aria-modal="true" aria-labelledby="snapshot-dialog-title">
+        <header class="dialog-header">
+          <div>
+            <h2 id="snapshot-dialog-title">{{ selectedSnapshot.name }}</h2>
+            <p>{{ selectedSnapshot.origin }} · {{ formatBytes(selectedSnapshot.sizeBytes) }}</p>
+          </div>
+          <button class="icon-button small-icon" title="Close" aria-label="Close" @click="closeSnapshotDetails">
+            ×
+          </button>
+        </header>
+
+        <p class="dialog-warning">
+          This view may expose session cookies, tokens, and client secrets.
+        </p>
+
+        <div class="detail-section">
+          <h3>Cookies ({{ selectedSnapshot.cookies.length }})</h3>
+          <p v-if="selectedSnapshot.cookies.length === 0" class="detail-empty">No cookies saved.</p>
+          <div v-for="cookie in selectedSnapshot.cookies" :key="`${cookie.domain}:${cookie.path}:${cookie.name}`" class="detail-item">
+            <div class="detail-line">
+              <strong>{{ cookie.name }}</strong>
+              <span>{{ cookie.domain }}{{ cookie.path }}</span>
+            </div>
+            <code>{{ cookie.value }}</code>
+            <div class="chips compact-chips">
+              <span v-if="cookie.httpOnly">HttpOnly</span>
+              <span v-if="cookie.secure">Secure</span>
+              <span>{{ cookie.sameSite ?? 'sameSite unknown' }}</span>
+              <span>{{ cookie.session ? 'Session' : 'Persistent' }}</span>
+              <span v-if="cookie.partitionKey">Partitioned</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="detail-section">
+          <h3>localStorage ({{ Object.keys(selectedSnapshot.localStorage).length }})</h3>
+          <p v-if="Object.keys(selectedSnapshot.localStorage).length === 0" class="detail-empty">
+            No localStorage entries saved.
+          </p>
+          <div v-for="[key, value] in Object.entries(selectedSnapshot.localStorage)" :key="key" class="detail-item">
+            <strong>{{ key }}</strong>
+            <code>{{ value }}</code>
+          </div>
+        </div>
+
+        <div class="detail-section">
+          <h3>sessionStorage ({{ Object.keys(selectedSnapshot.sessionStorage).length }})</h3>
+          <p v-if="Object.keys(selectedSnapshot.sessionStorage).length === 0" class="detail-empty">
+            No sessionStorage entries saved.
+          </p>
+          <div v-for="[key, value] in Object.entries(selectedSnapshot.sessionStorage)" :key="key" class="detail-item">
+            <strong>{{ key }}</strong>
+            <code>{{ value }}</code>
+          </div>
+        </div>
+      </section>
+    </div>
   </main>
 </template>
